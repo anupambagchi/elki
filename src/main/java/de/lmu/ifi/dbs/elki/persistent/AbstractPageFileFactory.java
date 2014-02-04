@@ -1,0 +1,100 @@
+package de.lmu.ifi.dbs.elki.persistent;
+
+/*
+ This file is part of ELKI:
+ Environment for Developing KDD-Applications Supported by Index-Structures
+
+ Copyright (C) 2013
+ Ludwig-Maximilians-Universität München
+ Lehr- und Forschungseinheit für Datenbanksysteme
+ ELKI Development Team
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.AbstractParameterizer;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.OptionID;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.constraints.CommonConstraints;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameterization.Parameterization;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameters.IntParameter;
+
+/**
+ * Abstract page file factory.
+ * 
+ * @author Erich Schubert
+ * 
+ * @param <P> Page type
+ */
+public abstract class AbstractPageFileFactory<P extends Page> implements PageFileFactory<P> {
+  /**
+   * Holds the value of {@link Parameterizer#PAGE_SIZE_ID}.
+   */
+  protected int pageSize;
+
+  /**
+   * Constructor.
+   * 
+   * @param pageSize Page size
+   */
+  public AbstractPageFileFactory(int pageSize) {
+    super();
+    this.pageSize = pageSize;
+  }
+
+  @Override
+  public int getPageSize() {
+    return pageSize;
+  }
+
+  /**
+   * Parameterization class.
+   * 
+   * @apiviz.exclude
+   * 
+   * @author Erich Schubert
+   * 
+   * @param <P> Page type
+   */
+  public static abstract class Parameterizer<P extends Page> extends AbstractParameterizer {
+    /**
+     * Parameter to specify the size of a page in bytes, must be an integer
+     * greater than 0.
+     * <p>
+     * Default value: {@code 4000}
+     * </p>
+     * <p>
+     * Key: {@code -pagefile.pagesize}
+     * </p>
+     */
+    public static final OptionID PAGE_SIZE_ID = new OptionID("pagefile.pagesize", "The size of a page in bytes.");
+
+    /**
+     * Page size
+     */
+    protected int pageSize;
+
+    @Override
+    protected void makeOptions(Parameterization config) {
+      super.makeOptions(config);
+      final IntParameter pageSizeP = new IntParameter(PAGE_SIZE_ID, 4000);
+      pageSizeP.addConstraint(CommonConstraints.GREATER_EQUAL_ONE_INT);
+      if(config.grab(pageSizeP)) {
+        pageSize = pageSizeP.getValue();
+      }
+    }
+
+    @Override
+    abstract protected PageFileFactory<P> makeInstance();
+  }
+}

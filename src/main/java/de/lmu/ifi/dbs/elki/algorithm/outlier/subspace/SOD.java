@@ -1,0 +1,407 @@
+package de.lmu.ifi.dbs.elki.algorithm.outlier.subspace;
+
+/*
+ This file is part of ELKI:
+ Environment for Developing KDD-Applications Supported by Index-Structures
+
+ Copyright (C) 2013
+ Ludwig-Maximilians-Universität München
+ Lehr- und Forschungseinheit für Datenbanksysteme
+ ELKI Development Team
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import java.util.BitSet;
+
+import de.lmu.ifi.dbs.elki.algorithm.AbstractAlgorithm;
+import de.lmu.ifi.dbs.elki.algorithm.outlier.OutlierAlgorithm;
+import de.lmu.ifi.dbs.elki.data.NumberVector;
+import de.lmu.ifi.dbs.elki.data.type.SimpleTypeInformation;
+import de.lmu.ifi.dbs.elki.data.type.TypeInformation;
+import de.lmu.ifi.dbs.elki.data.type.TypeUtil;
+import de.lmu.ifi.dbs.elki.database.datastore.DataStoreFactory;
+import de.lmu.ifi.dbs.elki.database.datastore.DataStoreUtil;
+import de.lmu.ifi.dbs.elki.database.datastore.WritableDataStore;
+import de.lmu.ifi.dbs.elki.database.datastore.WritableDoubleDataStore;
+import de.lmu.ifi.dbs.elki.database.ids.ArrayModifiableDBIDs;
+import de.lmu.ifi.dbs.elki.database.ids.DBIDIter;
+import de.lmu.ifi.dbs.elki.database.ids.DBIDRef;
+import de.lmu.ifi.dbs.elki.database.ids.DBIDUtil;
+import de.lmu.ifi.dbs.elki.database.ids.DBIDs;
+import de.lmu.ifi.dbs.elki.database.ids.DoubleDBIDPair;
+import de.lmu.ifi.dbs.elki.database.query.similarity.SimilarityQuery;
+import de.lmu.ifi.dbs.elki.database.relation.MaterializedRelation;
+import de.lmu.ifi.dbs.elki.database.relation.Relation;
+import de.lmu.ifi.dbs.elki.distance.distancefunction.subspace.SubspaceEuclideanDistanceFunction;
+import de.lmu.ifi.dbs.elki.distance.distancevalue.NumberDistance;
+import de.lmu.ifi.dbs.elki.distance.similarityfunction.SharedNearestNeighborSimilarityFunction;
+import de.lmu.ifi.dbs.elki.distance.similarityfunction.SimilarityFunction;
+import de.lmu.ifi.dbs.elki.logging.Logging;
+import de.lmu.ifi.dbs.elki.logging.progress.FiniteProgress;
+import de.lmu.ifi.dbs.elki.math.DoubleMinMax;
+import de.lmu.ifi.dbs.elki.math.Mean;
+import de.lmu.ifi.dbs.elki.math.linearalgebra.Centroid;
+import de.lmu.ifi.dbs.elki.math.linearalgebra.Vector;
+import de.lmu.ifi.dbs.elki.result.outlier.BasicOutlierScoreMeta;
+import de.lmu.ifi.dbs.elki.result.outlier.OutlierResult;
+import de.lmu.ifi.dbs.elki.result.outlier.OutlierScoreMeta;
+import de.lmu.ifi.dbs.elki.result.textwriter.TextWriteable;
+import de.lmu.ifi.dbs.elki.result.textwriter.TextWriterStream;
+import de.lmu.ifi.dbs.elki.utilities.datastructures.heap.Heap;
+import de.lmu.ifi.dbs.elki.utilities.datastructures.heap.TiedTopBoundedHeap;
+import de.lmu.ifi.dbs.elki.utilities.documentation.Description;
+import de.lmu.ifi.dbs.elki.utilities.documentation.Reference;
+import de.lmu.ifi.dbs.elki.utilities.documentation.Title;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.AbstractParameterizer;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.OptionID;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.constraints.CommonConstraints;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameterization.Parameterization;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameters.DoubleParameter;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameters.Flag;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameters.IntParameter;
+import de.lmu.ifi.dbs.elki.utilities.optionhandling.parameters.ObjectParameter;
+
+/**
+ * Subspace Outlier Degree. Outlier detection method for axis-parallel
+ * subspaces.
+ * 
+ * Reference:
+ * <p>
+ * * H.-P. Kriegel, P. Kröger, E. Schubert, A. Zimek:<br />
+ * Outlier Detection in Axis-Parallel Subspaces of High Dimensional Data<br />
+ * In: Proceedings of the 13th Pacific-Asia Conference on Knowledge Discovery
+ * and Data Mining (PAKDD), Bangkok, Thailand, 2009
+ * </p>
+ * 
+ * @author Arthur Zimek
+ * 
+ * @apiviz.has SODModel oneway - - computes
+ * @apiviz.has SharedNearestNeighborSimilarityFunction
+ * 
+ * @param <V> the type of NumberVector handled by this Algorithm
+ * @param <D> distance type
+ */
+@Title("SOD: Subspace outlier degree")
+@Description("Outlier Detection in Axis-Parallel Subspaces of High Dimensional Data")
+@Reference(authors = "H.-P. Kriegel, P. Kröger, E. Schubert, A. Zimek", title = "Outlier Detection in Axis-Parallel Subspaces of High Dimensional Data", booktitle = "Proceedings of the 13th Pacific-Asia Conference on Knowledge Discovery and Data Mining (PAKDD), Bangkok, Thailand, 2009", url = "http://dx.doi.org/10.1007/978-3-642-01307-2")
+public class SOD<V extends NumberVector<?>, D extends NumberDistance<D, ?>> extends AbstractAlgorithm<OutlierResult> implements OutlierAlgorithm {
+  /**
+   * The logger for this class.
+   */
+  private static final Logging LOG = Logging.getLogger(SOD.class);
+
+  /**
+   * Neighborhood size.
+   */
+  private int knn;
+
+  /**
+   * Alpha (discriminance value).
+   */
+  private double alpha;
+
+  /**
+   * Similarity function to use.
+   */
+  private SimilarityFunction<V, D> similarityFunction;
+
+  /**
+   * Report models.
+   */
+  private boolean models;
+
+  /**
+   * Constructor with parameters.
+   * 
+   * @param knn knn value
+   * @param alpha Alpha parameter
+   * @param similarityFunction Shared nearest neighbor similarity function
+   * @param models Report generated models
+   */
+  public SOD(int knn, double alpha, SimilarityFunction<V, D> similarityFunction, boolean models) {
+    super();
+    this.knn = knn;
+    this.alpha = alpha;
+    this.similarityFunction = similarityFunction;
+    this.models = models;
+  }
+
+  /**
+   * Performs the SOD algorithm on the given database.
+   * 
+   * @param relation Data relation to process
+   * @return Outlier result
+   */
+  public OutlierResult run(Relation<V> relation) {
+    SimilarityQuery<V, D> snnInstance = similarityFunction.instantiate(relation);
+    FiniteProgress progress = LOG.isVerbose() ? new FiniteProgress("Assigning Subspace Outlier Degree", relation.size(), LOG) : null;
+    final WritableDoubleDataStore sod_scores = DataStoreUtil.makeDoubleStorage(relation.getDBIDs(), DataStoreFactory.HINT_STATIC);
+    WritableDataStore<SODModel> sod_models = null;
+    if (models) { // Models requested
+      sod_models = DataStoreUtil.makeStorage(relation.getDBIDs(), DataStoreFactory.HINT_STATIC, SODModel.class);
+    }
+    DoubleMinMax minmax = new DoubleMinMax();
+    for (DBIDIter iter = relation.iterDBIDs(); iter.valid(); iter.advance()) {
+      if (progress != null) {
+        progress.incrementProcessed(LOG);
+      }
+      DBIDs neighborhood = getNearestNeighbors(relation, snnInstance, iter);
+
+      Vector center;
+      BitSet weightVector;
+      double sod;
+      if (neighborhood.size() > 0) {
+        center = Centroid.make(relation, neighborhood);
+        // Note: per-dimension variances; no covariances.
+        double[] variances = computePerDimensionVariances(relation, center, neighborhood);
+        double expectationOfVariance = Mean.of(variances);
+        weightVector = new BitSet(variances.length);
+        for (int d = 0; d < variances.length; d++) {
+          if (variances[d] < alpha * expectationOfVariance) {
+            weightVector.set(d, true);
+          }
+        }
+        sod = subspaceOutlierDegree(relation.get(iter), center, weightVector);
+      } else {
+        center = relation.get(iter).getColumnVector();
+        weightVector = null;
+        sod = 0.;
+      }
+
+      if (sod_models != null) {
+        sod_models.put(iter, new SODModel(center, weightVector));
+      }
+      sod_scores.putDouble(iter, sod);
+      minmax.put(sod);
+    }
+    if (progress != null) {
+      progress.ensureCompleted(LOG);
+    }
+    // combine results.
+    OutlierScoreMeta meta = new BasicOutlierScoreMeta(minmax.getMin(), minmax.getMax());
+    OutlierResult sodResult = new OutlierResult(meta, new MaterializedRelation<>("Subspace Outlier Degree", "sod-outlier", TypeUtil.DOUBLE, sod_scores, relation.getDBIDs()));
+    if (sod_models != null) {
+      Relation<SODModel> models = new MaterializedRelation<>("Subspace Outlier Model", "sod-outlier", new SimpleTypeInformation<>(SODModel.class), sod_models, relation.getDBIDs());
+      sodResult.addChildResult(models);
+    }
+    return sodResult;
+  }
+
+  /**
+   * Provides the k nearest neighbors in terms of the shared nearest neighbor
+   * distance.
+   * <p/>
+   * The query object is excluded from the knn list.
+   * 
+   * FIXME: move this to the database layer.
+   * 
+   * @param relation the database holding the objects
+   * @param simQ similarity function
+   * @param queryObject the query object for which the kNNs should be determined
+   * @return the k nearest neighbors in terms of the shared nearest neighbor
+   *         distance without the query object
+   */
+  private DBIDs getNearestNeighbors(Relation<V> relation, SimilarityQuery<V, D> simQ, DBIDRef queryObject) {
+    Heap<DoubleDBIDPair> nearestNeighbors = new TiedTopBoundedHeap<>(knn);
+    for (DBIDIter iter = relation.iterDBIDs(); iter.valid(); iter.advance()) {
+      if (DBIDUtil.equal(iter, queryObject)) {
+        continue;
+      }
+      double sim = simQ.similarity(queryObject, iter).doubleValue();
+      if (sim > 0.) {
+        nearestNeighbors.add(DBIDUtil.newPair(sim, iter));
+      }
+    }
+    // Collect DBIDs
+    ArrayModifiableDBIDs dbids = DBIDUtil.newArray(nearestNeighbors.size());
+    while (nearestNeighbors.size() > 0) {
+      dbids.add(nearestNeighbors.poll());
+    }
+    return dbids;
+  }
+
+  /**
+   * Compute the per-dimension variances for the given neighborhood and center.
+   * 
+   * @param relation Data relation
+   * @param center Center vector
+   * @param neighborhood Neighbors
+   * @return Per-dimension variances.
+   */
+  private static double[] computePerDimensionVariances(Relation<? extends NumberVector<?>> relation, Vector center, DBIDs neighborhood) {
+    double[] c = center.getArrayRef();
+    double[] variances = new double[c.length];
+    for (DBIDIter iter = neighborhood.iter(); iter.valid(); iter.advance()) {
+      NumberVector<?> databaseObject = relation.get(iter);
+      for (int d = 0; d < c.length; d++) {
+        final double deviation = databaseObject.doubleValue(d) - c[d];
+        variances[d] += deviation * deviation;
+      }
+    }
+    for (int d = 0; d < variances.length; d++) {
+      variances[d] /= neighborhood.size();
+    }
+    return variances;
+  }
+
+  /**
+   * Compute SOD score.
+   * 
+   * @param queryObject Query object
+   * @param center Center vector
+   * @param weightVector Weight vector
+   * @return sod score
+   */
+  private double subspaceOutlierDegree(V queryObject, Vector center, BitSet weightVector) {
+    final int card = weightVector.cardinality();
+    if (card == 0) {
+      return 0;
+    }
+    final SubspaceEuclideanDistanceFunction df = new SubspaceEuclideanDistanceFunction(weightVector);
+    double distance = df.distance(queryObject, center).doubleValue();
+    distance /= card; // FIXME: defined as card, should be sqrt(card),
+                      // unfortunately
+    return distance;
+  }
+
+  @Override
+  public TypeInformation[] getInputTypeRestriction() {
+    return TypeUtil.array(TypeUtil.NUMBER_VECTOR_FIELD);
+  }
+
+  @Override
+  protected Logging getLogger() {
+    return LOG;
+  }
+
+  /**
+   * SOD Model class
+   * 
+   * @author Arthur Zimek
+   */
+  public static class SODModel implements TextWriteable {
+    /**
+     * Center vector
+     */
+    private Vector center;
+
+    /**
+     * Relevant dimensions.
+     */
+    private BitSet weightVector;
+
+    /**
+     * Initialize SOD Model
+     * 
+     * @param center Center vector
+     * @param weightVector Selected dimensions
+     */
+    public SODModel(Vector center, BitSet weightVector) {
+      this.center = center;
+      this.weightVector = weightVector;
+    }
+
+    @Override
+    public void writeToText(TextWriterStream out, String label) {
+      out.commentPrintLn(this.getClass().getSimpleName() + ":");
+      out.commentPrintLn("relevant attributes (counting starts with 0): " + this.weightVector.toString());
+      out.commentPrintLn("center of neighborhood: " + out.normalizationRestore(center).toString());
+      out.commentPrintSeparator();
+    }
+  }
+
+  /**
+   * Parameterization class.
+   * 
+   * @author Erich Schubert
+   * 
+   * @apiviz.exclude
+   */
+  public static class Parameterizer<V extends NumberVector<?>, D extends NumberDistance<D, ?>> extends AbstractParameterizer {
+    /**
+     * Parameter to specify the number of shared nearest neighbors to be
+     * considered for learning the subspace properties., must be an integer
+     * greater than 0.
+     */
+    public static final OptionID KNN_ID = new OptionID("sod.knn", "The number of most snn-similar objects to use as reference set for learning the subspace properties.");
+
+    /**
+     * Parameter to indicate the multiplier for the discriminance value for
+     * discerning small from large variances.
+     */
+    public static final OptionID ALPHA_ID = new OptionID("sod.alpha", "The multiplier for the discriminance value for discerning small from large variances.");
+
+    /**
+     * Parameter for the similarity function.
+     */
+    public static final OptionID SIM_ID = new OptionID("sod.similarity", "The similarity function used for the neighborhood set.");
+
+    /**
+     * Parameter for keeping the models.
+     */
+    public static final OptionID MODELS_ID = new OptionID("sod.models", "Report the models computed by SOD (default: report only scores).");
+
+    /**
+     * Neighborhood size
+     */
+    private int knn = 1;
+
+    /**
+     * Alpha (discriminance value).
+     */
+    private double alpha = 1.1;
+
+    /**
+     * The similarity function.
+     */
+    private SimilarityFunction<V, D> similarityFunction;
+
+    /**
+     * Track models.
+     */
+    private boolean models = false;
+
+    @Override
+    protected void makeOptions(Parameterization config) {
+      super.makeOptions(config);
+      final ObjectParameter<SimilarityFunction<V, D>> simP = new ObjectParameter<>(SIM_ID, SimilarityFunction.class, SharedNearestNeighborSimilarityFunction.class);
+      if (config.grab(simP)) {
+        similarityFunction = simP.instantiateClass(config);
+      }
+
+      final IntParameter knnP = new IntParameter(KNN_ID);
+      knnP.addConstraint(CommonConstraints.GREATER_EQUAL_ONE_INT);
+      if (config.grab(knnP)) {
+        knn = knnP.getValue();
+      }
+
+      final DoubleParameter alphaP = new DoubleParameter(ALPHA_ID, 1.1);
+      alphaP.addConstraint(CommonConstraints.GREATER_THAN_ZERO_DOUBLE);
+      if (config.grab(alphaP)) {
+        alpha = alphaP.doubleValue();
+      }
+
+      final Flag modelsF = new Flag(MODELS_ID);
+      if (config.grab(modelsF)) {
+        models = modelsF.isTrue();
+      }
+    }
+
+    @Override
+    protected SOD<V, D> makeInstance() {
+      return new SOD<>(knn, alpha, similarityFunction, models);
+    }
+  }
+}

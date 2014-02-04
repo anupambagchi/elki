@@ -1,0 +1,104 @@
+package de.lmu.ifi.dbs.elki.utilities.optionhandling;
+
+/*
+ This file is part of ELKI:
+ Environment for Developing KDD-Applications Supported by Index-Structures
+
+ Copyright (C) 2013
+ Ludwig-Maximilians-Universität München
+ Lehr- und Forschungseinheit für Datenbanksysteme
+ ELKI Development Team
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/**
+ * An OptionID is used by option handlers as a unique identifier for specific
+ * options. There is no option possible without a specific OptionID defined
+ * within this class.
+ * 
+ * @author Elke Achtert
+ */
+public final class OptionID {
+  /**
+   * Option name
+   */
+  private String name;
+
+  /**
+   * The description of the OptionID.
+   */
+  private String description;
+
+  /**
+   * Provides a new OptionID of the given name and description.
+   * <p/>
+   * All OptionIDs are unique w.r.t. their name. An OptionID provides
+   * additionally a description of the option.
+   * 
+   * @param name the name of the option
+   * @param description the description of the option
+   */
+  public OptionID(final String name, final String description) {
+    super();
+    this.name = name;
+    this.description = description;
+  }
+
+  /**
+   * Returns the description of this OptionID.
+   * 
+   * @return the description of this OptionID
+   */
+  public String getDescription() {
+    return description;
+  }
+
+  /**
+   * Gets or creates the OptionID for the given class and given name. The
+   * OptionID usually is named as the classes name (lowercase) as name-prefix
+   * and the given name as suffix of the complete name, separated by a dot. For
+   * example, the parameter {@code epsilon} for the class
+   * {@link de.lmu.ifi.dbs.elki.algorithm.clustering.DBSCAN} will be named
+   * {@code dbscan.epsilon}.
+   * 
+   * @param name the name
+   * @param description the description is also set if the named OptionID does
+   *        exist already
+   * @return the OptionID for the given name
+   */
+  public static OptionID getOrCreateOptionID(final String name, final String description) {
+    return new OptionID(name, description);
+  }
+
+  /**
+   * Returns the name of this OptionID.
+   * 
+   * @return the name
+   * @see java.lang.Object#toString()
+   */
+  @Override
+  public String toString() {
+    return getName();
+  }
+
+  /**
+   * Get the option name.
+   * 
+   * @return Option name
+   */
+  public String getName() {
+    return name;
+  }
+}
