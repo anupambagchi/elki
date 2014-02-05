@@ -23,6 +23,8 @@
         </profile>
     </profiles>
 
+    <!-- To build this quickly use: mvn -Dmaven.test.skip=true package -->
+    <!-- To run the MiniGUI use: mvn exec:java -->
     <build>
         <pluginManagement>
             <plugins>
@@ -30,6 +32,15 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>1.1</version>
+                <configuration>
+                    <mainClass>de.lmu.ifi.dbs.elki.application.ELKILauncher</mainClass>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -111,14 +122,6 @@
             <artifactId>batik-swing</artifactId>
             <version>1.7</version>
         </dependency>
-
-        <!--
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>5.1.28</version>
-        </dependency>
-        -->
 
         <dependency>
             <groupId>org.codehaus.mojo</groupId>
